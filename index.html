@@ -213,7 +213,13 @@
   }
   .quiz-check-btn:hover{ background: var(--gold-bright); }
   .quiz-check-btn:disabled{ opacity:.4; cursor:default; }
+  .quiz-retry-btn{
+    background: transparent; color: var(--gold-bright); border:1px solid var(--gold-bright); font-family:var(--sans);
+    font-size:13.5px; font-weight:700; padding:11px 20px; border-radius:7px; cursor:pointer;
+  }
+  .quiz-retry-btn:hover{ background: rgba(214,178,104,0.14); }
   .quiz-score{ font-family:var(--mono); font-size:12.5px; letter-spacing:.05em; color: rgba(244,240,228,0.6); }
+  .quiz-score.warning{ color:#e0a85a; }
   .quiz-score b{ color:#fff; }
 
   .chap-nav{
@@ -285,7 +291,7 @@ DATA.forEach((mod, mi) => {
   mod.chapters.forEach((c, ci) => FLAT.push({ mi, ci, mod, chap: c }));
 });
 
-let visited = new Set();
+let completed = new Set(); // chapitres réellement terminés (quiz réussi, ou pas de quiz)
 let current = null; // {mi, ci} or null = cover
 
 function toggleSidebar(){
@@ -302,11 +308,11 @@ function renderSupplyBar(){
   FLAT.forEach((f, idx) => {
     const seg = document.createElement('div');
     seg.className = 'supply-seg';
-    if (visited.has(idx)) seg.className += ' visited';
+    if (completed.has(idx)) seg.className += ' visited';
     if (current && f.mi === current.mi && f.ci === current.ci) seg.className += ' current';
     bar.appendChild(seg);
   });
-  document.getElementById('supply-count').textContent = visited.size + ' / ' + FLAT.length;
+  document.getElementById('supply-count').textContent = completed.size + ' / ' + FLAT.length;
 }
 
 function renderTOC(){
@@ -331,7 +337,7 @@ function renderTOC(){
       const flatIdx = FLAT.findIndex(f => f.mi===mi && f.ci===ci);
       const item = document.createElement('div');
       item.className = 'toc-chapter';
-      if (visited.has(flatIdx)) item.className += ' visited';
+      if (completed.has(flatIdx)) item.className += ' visited';
       if (current && current.mi===mi && current.ci===ci) item.className += ' active';
       item.innerHTML = '<span class="dot"></span><span class="n">' + String(c.n).padStart(2,'0') + '</span><span>' + c.title + '</span>';
       item.onclick = () => { goTo(mi, ci); if(window.innerWidth<=880) document.getElementById('sidebar').classList.remove('open'); };
@@ -452,6 +458,19 @@ function checkQuiz(){
   const mod = DATA[current.mi];
   const c = mod.chapters[current.ci];
   const quiz = c.quiz || [];
+  const flatIdx = FLAT.findIndex(f => f.mi===current.mi && f.ci===current.ci);
+
+  // Empêche la vérification tant que toutes les questions n'ont pas reçu de réponse
+  const unanswered = quiz.some((q, qi) => quizAnswers[qi] === undefined);
+  if (unanswered){
+    const scoreEl = document.getElementById('quiz-score');
+    if (scoreEl){
+      scoreEl.classList.add('warning');
+      scoreEl.textContent = 'Merci de répondre à toutes les questions avant de vérifier.';
+    }
+    return;
+  }
+
   let score = 0;
   quiz.forEach((q, qi) => {
     const qDiv = document.querySelector('.quiz-q[data-qidx="'+qi+'"]');
@@ -471,13 +490,45 @@ function checkQuiz(){
   const btn = document.getElementById('quiz-check-btn');
   if (btn) btn.disabled = true;
   const scoreEl = document.getElementById('quiz-score');
-  if (scoreEl) scoreEl.innerHTML = 'Score : <b>' + score + ' / ' + quiz.length + '</b>';
+  if (scoreEl){
+    scoreEl.classList.remove('warning');
+    scoreEl.innerHTML = 'Score : <b>' + score + ' / ' + quiz.length + '</b>';
+  }
+
+  if (score === quiz.length){
+    // Chapitre validé : le quiz est parfaitement réussi
+    completed.add(flatIdx);
+  } else {
+    // Score imparfait : proposer de repasser le quiz
+    const actions = document.querySelector('.quiz-actions');
+    if (actions && !document.getElementById('quiz-retry-btn')){
+      const retryBtn = document.createElement('button');
+      retryBtn.id = 'quiz-retry-btn';
+      retryBtn.className = 'quiz-retry-btn';
+      retryBtn.textContent = 'Repasser le quiz';
+      retryBtn.onclick = retryQuiz;
+      actions.appendChild(retryBtn);
+    }
+  }
+  renderTOC();
+  renderSupplyBar();
+}
+
+function retryQuiz(){
+  quizAnswers = {};
+  quizChecked = false;
+  document.getElementById('page').innerHTML = chapterHTML(current.mi, current.ci);
 }
 
 function goTo(mi, ci){
   current = { mi, ci };
   const flatIdx = FLAT.findIndex(f => f.mi===mi && f.ci===ci);
-  visited.add(flatIdx);
+  const chap = FLAT[flatIdx].chap;
+  // Un chapitre sans quiz est considéré terminé dès sa lecture ;
+  // un chapitre avec quiz ne compte comme terminé que si le quiz a été réussi (voir checkQuiz).
+  if (!chap.quiz || !chap.quiz.length){
+    completed.add(flatIdx);
+  }
   quizAnswers = {};
   quizChecked = false;
   document.getElementById('page').innerHTML = chapterHTML(mi, ci);
